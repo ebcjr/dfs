@@ -12,7 +12,8 @@ const appState = {
   editingTreeId: null,
   selectedCat: null,
   sortOrder: 'logical', // 'logical', 'dap', 'ht', 'cat'
-  covaDisplayMode: 'relative' // 'relative' ou 'absolute'
+  covaDisplayMode: 'relative', // 'relative' ou 'absolute'
+  plotDataSource: 'atual'
 };
 
 const CATEGORIES = [
@@ -98,7 +99,7 @@ async function renderHome() {
   homeScreen.innerHTML = `
     <div class="topbar" style="display: flex; justify-content: space-between; align-items: center;">
       <div>
-        <div class="topbar-title">DendroFS</div>
+        <div class="topbar-title">DendroFS 1.1</div>
         <div class="topbar-sub" id="home-campaign-name">${appState.campaign.name || 'Sem campanha'}</div>
       </div>
       
@@ -300,7 +301,16 @@ function setupEventDelegation() {
       document.getElementById('modal-plot-info').classList.add('hidden'); }
     else if (action === 'open-plot-form') { openNewPlotForm(); }
     else if (action === 'close-plot-form') { document.getElementById('modal-new-plot').classList.add('hidden'); }
-    else if (action === 'save-new-plot') { await saveNewPlot(); }  
+    else if (action === 'save-new-plot') { await saveNewPlot(); }
+    else if (action === 'open-plot') {
+      appState.currentPlotId = target.dataset.plotId;
+      appState.plotDataSource = 'atual'; // RESET: Abre sempre na aba atual
+      go('screen-plot');
+      renderPlot();
+    }
+    // AÇÕES DAS ABAS DA PARCELA
+    else if (action === 'tab-atual') { appState.plotDataSource = 'atual'; await renderPlot(); }
+    else if (action === 'tab-historico') { appState.plotDataSource = 'historico'; await renderPlot(); }
     // Acoes de arvore
     else if (action === 'open-tree-form') {
       const treeId = target.dataset.treeId || null;
@@ -741,29 +751,37 @@ async function renderPlot() {
   const plot = await db.plots.get(appState.currentPlotId);
   if (!plot) return go('screen-home');
 
-  const trees = await db.trees.where('plotId').equals(plot.id).toArray();
+  appState.plotDataSource = appState.plotDataSource || 'atual';
+  const isHistory = appState.plotDataSource === 'historico';
+
+  // Decide de qual banco de dados puxar a lista
+  let trees = [];
+  if (isHistory) {
+    trees = await db.history.where('plotId').equals(plot.id).toArray();
+  } else {
+    trees = await db.trees.where('plotId').equals(plot.id).toArray();
+  }
   
-  // Ordenacao
   trees.sort((a, b) => {
     if (appState.sortOrder === 'logical') {
       if (a.fila !== b.fila) return a.fila - b.fila;
       if (a.cova !== b.cova) return a.cova - b.cova;
       return a.fuste - b.fuste;
     } else if (appState.sortOrder === 'dap') {
-      return (b.dap || 0) - (a.dap || 0); // Decrescente
+      return (b.dap || 0) - (a.dap || 0);
     } else if (appState.sortOrder === 'ht') {
-      return (b.ht || 0) - (a.ht || 0);   // Decrescente
+      return (b.ht || 0) - (a.ht || 0);
     } else if (appState.sortOrder === 'cat') {
-      return (a.cat || '').localeCompare(b.cat || ''); // Alfabetico
+      return (a.cat || '').localeCompare(b.cat || '');
     }
   });
 
   const htMedidas = trees.filter(t => t.ht != null).length;
-  const totalPlotFlags = trees.reduce((acc, t) => acc + (t.flags ? t.flags.length : 0), 0);
+  // O histórico não tem flags de consistência a serem resolvidas agora
+  const totalPlotFlags = isHistory ? 0 : trees.reduce((acc, t) => acc + (t.flags ? t.flags.length : 0), 0);
 
   const screen = document.getElementById('screen-plot');
   
-  // Monta a estrutura da tela e embute o Modal (escondido por padrão)
   screen.innerHTML = `
     <div class="topbar">
       <button class="btn-icon" data-action="go-home">←</button>
@@ -774,6 +792,12 @@ async function renderPlot() {
       <button class="btn-icon" data-action="show-plot-info" title="Info">ℹ</button>
     </div>
     <div class="content">
+
+      <div style="display:flex; border-bottom:1px solid var(--border); margin-bottom:12px;">
+        <div data-action="tab-atual" style="flex:1; text-align:center; padding:10px; cursor:pointer; font-weight:bold; font-size:14px; transition: 0.2s; ${!isHistory ? 'color:var(--green); border-bottom:2px solid var(--green);' : 'color:var(--text2);'}">Atual</div>
+        <div data-action="tab-historico" style="flex:1; text-align:center; padding:10px; cursor:pointer; font-weight:bold; font-size:14px; transition: 0.2s; ${isHistory ? 'color:var(--amber); border-bottom:2px solid var(--amber);' : 'color:var(--text2);'}">Histórico</div>
+      </div>
+
       <div class="stats-bar" style="margin-bottom:10px">
         <div class="stat-box"><div class="stat-num">${trees.length}</div><div class="stat-lbl">observações</div></div>
         <div class="stat-box"><div class="stat-num">${htMedidas}</div><div class="stat-lbl">HT medidas</div></div>
@@ -796,16 +820,20 @@ async function renderPlot() {
         </div>
       </div>
 
-      <div id="tree-list">
-        ${trees.length === 0 ? '<div class="empty"><div class="empty-text">Nenhum fuste registrado</div></div>' : ''}
-      </div>
+      <div id="tree-list"></div>
 
-      <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; margin-top:12px">
-        <button class="btn btn-primary" data-action="open-tree-form" style="grid-column: 1 / -1; padding: 12px; font-size: 16px;">+ Fuste</button>
-        <button class="btn btn-secondary" data-action="find-dominants" style="border-color:var(--green); color:var(--green); font-size: 12px;">🔍 Doms</button>
-        <button class="btn btn-secondary" data-action="validate-plot" style="border-color:var(--amber); color:var(--amber); font-size: 12px;">⚡ Validar</button>
-        <button class="btn btn-secondary" data-action="show-gabarito" style="border-color:#3498db; color:#3498db; font-size: 12px;">🗺 Gabarito</button>
-      </div>
+      ${!isHistory ? `
+        <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; margin-top:12px">
+          <button class="btn btn-primary" data-action="open-tree-form" style="grid-column: 1 / -1; padding: 12px; font-size: 16px;">+ Fuste</button>
+          <button class="btn btn-secondary" data-action="find-dominants" style="border-color:var(--green); color:var(--green); font-size: 12px;">🔍 Doms</button>
+          <button class="btn btn-secondary" data-action="validate-plot" style="border-color:var(--amber); color:var(--amber); font-size: 12px;">⚡ Validar</button>
+          <button class="btn btn-secondary" data-action="show-gabarito" style="border-color:#3498db; color:#3498db; font-size: 12px;">🗺 Gabarito</button>
+        </div>
+      ` : `
+        <div style="margin-top:12px">
+          <button class="btn btn-secondary" data-action="show-gabarito" style="border-color:#3498db; color:#3498db; width:100%;">🗺 Ver no Gabarito</button>
+        </div>
+      `}
 
       <div style="margin-top:10px">
         <button class="btn btn-secondary" data-action="close-plot">Concluir parcela</button>
@@ -933,9 +961,15 @@ async function renderPlot() {
 }
 
 async function refreshPlotData() {
-  const trees = await db.trees.where('plotId').equals(appState.currentPlotId).toArray();
+  const isHistory = appState.plotDataSource === 'historico';
+  let trees = [];
   
-  // Aplica a ordenação atual
+  if (isHistory) {
+    trees = await db.history.where('plotId').equals(appState.currentPlotId).toArray();
+  } else {
+    trees = await db.trees.where('plotId').equals(appState.currentPlotId).toArray();
+  }
+  
   trees.sort((a, b) => {
     if (appState.sortOrder === 'logical') {
       if (a.fila !== b.fila) return a.fila - b.fila;
@@ -953,31 +987,46 @@ async function refreshPlotData() {
   const { map: covaMap } = buildCovaMap(trees);
   renderTreeListHTML(trees, covaMap);
 
-  // 2. Atualiza APENAS os números do painel de estatísticas no topo
-  const doms = trees.filter(t => t.cat === 'dominante');
-  const totalPlotFlags = trees.reduce((acc, t) => acc + (t.flags ? t.flags.length : 0), 0);
+  const htMedidas = trees.filter(t => t.ht != null).length;
+  const totalPlotFlags = isHistory ? 0 : trees.reduce((acc, t) => acc + (t.flags ? t.flags.length : 0), 0);
   
   const statNums = document.querySelectorAll('#screen-plot .stat-num');
   if (statNums.length >= 3) {
     statNums[0].textContent = trees.length;
-    statNums[1].textContent = trees.filter(t => t.ht != null).length;;
+    statNums[1].textContent = htMedidas;
     statNums[2].textContent = totalPlotFlags;
   }
 }
-
 function renderTreeListHTML(trees, covaMap = {}) {
   const container = document.getElementById('tree-list');
   if (!container) return;
-  if (trees.length === 0) return;
+  if (trees.length === 0) {
+    container.innerHTML = '<div class="empty"><div class="empty-text">Nenhum fuste registado</div></div>';
+    return;
+  }
 
   const fragment = document.createDocumentFragment();
+  
+  // VERIFICA SE ESTAMOS NA ABA DO HISTÓRICO
+  const isHistory = appState.plotDataSource === 'historico';
 
   trees.forEach(t => {
     const cat = CATEGORIES.find(c => c.key === t.cat);
     const item = document.createElement('div');
     item.className = `tree-item ${t.cat === 'dominante' ? 'dom-highlight' : ''}`;
-    item.dataset.action = 'open-tree-form';
-    item.dataset.treeId = t.id;
+    
+    // ==========================================
+    // AQUI ESTÁ A LÓGICA DO PASSO 5 APLICADA:
+    // Se NÃO for histórico, permite clicar. 
+    // Se for histórico, bloqueia o clique (cursor normal).
+    // ==========================================
+    if (!isHistory) {
+      item.dataset.action = 'open-tree-form';
+      item.dataset.treeId = t.id;
+      item.style.cursor = 'pointer';
+    } else {
+      item.style.cursor = 'default';
+    }
 
     const flagsHtml = t.flags && t.flags.length 
       ? `<div class="tree-flags" style="margin-top:6px;">${t.flags.map(f => 
@@ -1000,6 +1049,7 @@ function renderTreeListHTML(trees, covaMap = {}) {
     
     const centralBadge = t.central ? '<span style="color:var(--amber); margin-left:4px;">📍</span>' : '';
 
+    // A setinha '>' na penúltima linha só aparece se NÃO for histórico
     item.innerHTML = `
       <div class="tree-id">${t.fila}-${displayCova}-${t.fuste} ${centralBadge}</div>
       <div style="flex:1">
@@ -1010,7 +1060,7 @@ function renderTreeListHTML(trees, covaMap = {}) {
         </div>
         ${flagsHtml}
       </div>
-      <span style="color:var(--text3);font-size:16px">›</span>
+      ${!isHistory ? '<span style="color:var(--text3);font-size:16px">›</span>' : ''}
     `;
     fragment.appendChild(item);
   });
@@ -1018,7 +1068,6 @@ function renderTreeListHTML(trees, covaMap = {}) {
   container.innerHTML = '';
   container.appendChild(fragment);
 }
-
 // ============================================================
 // 8. FORMULARIO DE ARVORE E SALVAMENTO
 // ============================================================
