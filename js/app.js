@@ -11,7 +11,8 @@ const appState = {
   currentPlotId: null,
   editingTreeId: null,
   selectedCat: null,
-  sortOrder: 'logical' // 'logical', 'dap', 'ht', 'cat'
+  sortOrder: 'logical', // 'logical', 'dap', 'ht', 'cat'
+  covaDisplayMode: 'relative' // 'relative' ou 'absolute'
 };
 
 const CATEGORIES = [
@@ -343,6 +344,9 @@ function setupEventDelegation() {
   document.body.addEventListener('change', async (e) => {
     if (e.target.id === 'sort-trees') {
       appState.sortOrder = e.target.value;
+      await refreshPlotData();
+    } else if (e.target.id === 'display-cova') {
+      appState.covaDisplayMode = e.target.value;
       await refreshPlotData();
     } else if (e.target.id === 't-inst') {
       toggleInstrument(e.target.value);
@@ -708,6 +712,28 @@ async function wipeAllData() {
   }
 }
 
+// Traduz a Cova Absoluta do banco para a Cova Relativa visual
+function buildCovaMap(trees) {
+  const map = {};
+  const filas = {};
+  
+  trees.forEach(t => {
+    if (!filas[t.fila]) filas[t.fila] = new Set();
+    filas[t.fila].add(t.cova);
+  });
+  
+  for (const f in filas) {
+    filas[f] = Array.from(filas[f]).sort((a,b) => a-b);
+  }
+  
+  trees.forEach(t => {
+    const sorted = filas[t.fila];
+    map[t.id] = sorted ? sorted.indexOf(t.cova) + 1 : t.cova;
+  });
+  
+  return { map, filasSeq: filas };
+}
+
 // ============================================================
 // 7. TELA DA PARCELA & LISTA DE ARVORES
 // ============================================================
@@ -754,14 +780,20 @@ async function renderPlot() {
         <div class="stat-box"><div class="stat-num">${totalPlotFlags}</div><div class="stat-lbl">flags</div></div>
       </div>
 
-      <div class="sec" style="display:flex; justify-content:space-between; align-items:center;">
+      <div class="sec" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
         <span>Fustes</span>
-        <select id="sort-trees" style="width:auto; padding:4px 8px; font-size:12px; border-color:var(--border);">
-          <option value="logical" ${appState.sortOrder === 'logical' ? 'selected' : ''}>Ordem: Fuste</option>
-          <option value="dap" ${appState.sortOrder === 'dap' ? 'selected' : ''}>Ordem: Maior DAP</option>
-          <option value="ht" ${appState.sortOrder === 'ht' ? 'selected' : ''}>Ordem: Maior HT</option>
-          <option value="cat" ${appState.sortOrder === 'cat' ? 'selected' : ''}>Ordem: Categoria</option>
-        </select>
+        <div style="display: flex; gap: 4px;">
+          <select id="display-cova" style="padding:4px; font-size:11px; border-color:var(--border); border-radius:4px; outline:none;">
+            <option value="relative" ${appState.covaDisplayMode === 'absolute' ? '' : 'selected'}>Covas: Relativas</option>
+            <option value="absolute" ${appState.covaDisplayMode === 'absolute' ? 'selected' : ''}>Covas: Absolutas</option>
+          </select>
+          <select id="sort-trees" style="padding:4px; font-size:11px; border-color:var(--border); border-radius:4px; outline:none;">
+            <option value="logical" ${appState.sortOrder === 'logical' ? 'selected' : ''}>Ord: Fuste</option>
+            <option value="dap" ${appState.sortOrder === 'dap' ? 'selected' : ''}>Ord: DAP</option>
+            <option value="ht" ${appState.sortOrder === 'ht' ? 'selected' : ''}>Ord: HT</option>
+            <option value="cat" ${appState.sortOrder === 'cat' ? 'selected' : ''}>Ord: Cat</option>
+          </select>
+        </div>
       </div>
 
       <div id="tree-list">
@@ -784,13 +816,20 @@ async function renderPlot() {
     <div class="modal-overlay hidden" id="modal-tree">
       <div class="modal" id="modal-tree-inner">
         
-        <div class="modal-title" style="display:flex; justify-content:space-between; align-items:center;">
-          <span id="modal-tree-title-text">Novo Fuste</span>
-          <select id="t-inst" style="font-size:12px; padding:4px; border:none; background:var(--bg); border-radius:4px; color:var(--text3); outline:none;">
-            <option value="fita">Medição: Fita (CAP)</option>
-            <option value="suta">Medição: Suta (D1/D2)</option>
-            <option value="dap">Medição: Padrão (DAP)</option>
-          </select>
+        <div class="modal-title" style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+          <span id="modal-tree-title-text" style="white-space:nowrap;">Novo Fuste</span>
+          
+          <div style="display:flex; align-items:center; gap:8px;">
+            <label style="display:flex; align-items:center; gap:4px; font-size:11px; color:var(--text2); margin:0; cursor:pointer;">
+              <input type="checkbox" id="t-central" style="width:14px; height:14px; accent-color:var(--green); cursor:pointer;">
+              Centro
+            </label>
+            <select id="t-inst" style="font-size:11px; padding:4px; border:none; background:var(--bg); border-radius:4px; color:var(--text3); outline:none;">
+              <option value="dap">DAP Padrão</option>
+              <option value="fita">Fita (CAP)</option>
+              <option value="suta">Suta (D1/D2)</option>
+            </select>
+          </div>
         </div>
 
         <div class="field-row3">
@@ -883,7 +922,8 @@ async function renderPlot() {
   `;
 
   // Renderiza a lista de arvores e a grade de categorias
-  renderTreeListHTML(trees);
+  const { map: covaMap } = buildCovaMap(trees);
+  renderTreeListHTML(trees, covaMap);
   buildCatGrid();
 
   // Atualiza o status da parcela se for a primeira vez abrindo
@@ -910,8 +950,8 @@ async function refreshPlotData() {
     }
   });
 
-  // 1. Atualiza APENAS o HTML da lista de árvores
-  renderTreeListHTML(trees);
+  const { map: covaMap } = buildCovaMap(trees);
+  renderTreeListHTML(trees, covaMap);
 
   // 2. Atualiza APENAS os números do painel de estatísticas no topo
   const doms = trees.filter(t => t.cat === 'dominante');
@@ -925,10 +965,9 @@ async function refreshPlotData() {
   }
 }
 
-function renderTreeListHTML(trees) {
+function renderTreeListHTML(trees, covaMap = {}) {
   const container = document.getElementById('tree-list');
   if (!container) return;
-  
   if (trees.length === 0) return;
 
   const fragment = document.createDocumentFragment();
@@ -945,11 +984,10 @@ function renderTreeListHTML(trees) {
           `<span class="badge ${f.type === 'err' ? 'badge-err' : 'badge-warn'}" style="font-size:10px">${f.msg}</span>`
         ).join('')}</div>` : '';
 
-    // LÓGICA DE EXIBIÇÃO DO INSTRUMENTO
     let dapDisplay = '';
     if (t.dap != null) {
       if (t.inst === 'fita' && t.med1 != null) {
-        dapDisplay = `<span class="tree-val"><b>${t.med1.toFixed(1)}</b>cm (CAP) ➝ <b>${t.dap.toFixed(1)}</b>cm (DAP)</span>`;
+        dapDisplay = `<span class="tree-val"><b>${t.med1.toFixed(1)}</b>cm (CAP) ➝ <b>${t.dap.toFixed(1)}</b>cm</span>`;
       } else if (t.inst === 'suta' && t.med1 != null && t.med2 != null) {
         dapDisplay = `<span class="tree-val"><b>${t.med1.toFixed(1)}|${t.med2.toFixed(1)}</b> (Suta) ➝ <b>${t.dap.toFixed(1)}</b>cm</span>`;
       } else {
@@ -957,8 +995,13 @@ function renderTreeListHTML(trees) {
       }
     }
 
+    const relCova = covaMap[t.id] || t.cova;
+    const displayCova = appState.covaDisplayMode === 'absolute' ? t.cova : relCova;
+    
+    const centralBadge = t.central ? '<span style="color:var(--amber); margin-left:4px;">📍</span>' : '';
+
     item.innerHTML = `
-      <div class="tree-id">${t.fila}-${t.cova}-${t.fuste}</div>
+      <div class="tree-id">${t.fila}-${displayCova}-${t.fuste} ${centralBadge}</div>
       <div style="flex:1">
         <div class="tree-vals">
           ${dapDisplay}
@@ -1018,6 +1061,7 @@ async function openTreeForm(treeId) {
     document.getElementById('t-fila').value = t.fila;
     document.getElementById('t-cova').value = t.cova;
     document.getElementById('t-fuste').value = t.fuste;
+    document.getElementById('t-central').checked = !!t.central;
     
     // Configura e alterna a interface para o instrumento correto
     const inst = t.inst || 'dap';
@@ -1061,6 +1105,7 @@ async function openTreeForm(treeId) {
     document.getElementById('t-fila').value = nextFila;
     document.getElementById('t-cova').value = nextCova;
     document.getElementById('t-fuste').value = '1';
+    document.getElementById('t-central').checked = false;
     // --------------------------------------------------
 
     document.getElementById('t-dap').value = '';
@@ -1090,6 +1135,7 @@ async function saveTree() {
   const cova = parseInt(document.getElementById('t-cova').value);
   const fuste = parseInt(document.getElementById('t-fuste').value) || 1;
   const cat = appState.selectedCat;
+  const central = document.getElementById('t-central').checked;
   
   // LEITURA DO INSTRUMENTO E CONVERSÃO MATEMÁTICA
   const inst = document.getElementById('t-inst').value;
@@ -1127,7 +1173,7 @@ async function saveTree() {
   const treeData = {
     plotId: appState.currentPlotId,
     fila, cova, fuste, dap, ht, cat,
-    inst, med1, med2, // Salva os dados brutos e o instrumento
+    inst, med1, med2, central, // Salva os dados brutos e o instrumento
     sync_status: 'pending',
     ts: Date.now()
   };
@@ -1550,7 +1596,6 @@ async function drawGabaritoMap() {
   const espX = parseFloat(document.getElementById('gab-esp-x').value) || 3.15;
   const espY = parseFloat(document.getElementById('gab-esp-y').value) || 2.5;
   
-  // MATEMÁTICA DE ZOOM APLICADA AQUI
   const zoom = appState.gabaritoZoom || 1;
   const pxPerMeter = 20 * zoom; 
   const padding = 40 * zoom;
@@ -1559,27 +1604,18 @@ async function drawGabaritoMap() {
 
   container.innerHTML = '';
 
-  const filasData = {};
-  let minFila = Infinity, maxFila = -Infinity;
+  // Usa o novo utilitário global para reaproveitar a matemática das covas
+  const { map: covaMap, filasSeq } = buildCovaMap(trees);
 
-  trees.forEach(t => {
-    if (t.fila < minFila) minFila = t.fila;
-    if (t.fila > maxFila) maxFila = t.fila;
-    if (!filasData[t.fila]) filasData[t.fila] = new Set();
-    filasData[t.fila].add(t.cova);
-  });
-
+  const totalFilas = Object.keys(filasSeq).length;
   let maxCovasInRow = 0;
-  const filasSeq = {};
+  let minFila = Infinity;
 
-  for (const f in filasData) {
-    const seq = Array.from(filasData[f]).sort((a, b) => a - b);
-    filasSeq[f] = seq; 
-    if (seq.length > maxCovasInRow) maxCovasInRow = seq.length;
+  for (const f in filasSeq) {
+    if (parseInt(f) < minFila) minFila = parseInt(f);
+    if (filasSeq[f].length > maxCovasInRow) maxCovasInRow = filasSeq[f].length;
   }
 
-  const totalFilas = (maxFila - minFila) + 1;
-  // Aumenta o wrapper de acordo com o zoom
   const mapWidth = (totalFilas * espX * pxPerMeter) + (padding * 2);
   const mapHeight = (maxCovasInRow * espY * pxPerMeter) + (padding * 2);
 
@@ -1587,6 +1623,20 @@ async function drawGabaritoMap() {
   canvas.style.position = 'relative';
   canvas.style.width = `${mapWidth}px`;
   canvas.style.height = `${mapHeight}px`;
+
+  // CAMADA VETORIAL SVG (Para desenhar a linha do Centro da Parcela)
+  const svgNS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("width", mapWidth);
+  svg.setAttribute("height", mapHeight);
+  svg.style.position = 'absolute';
+  svg.style.left = '0';
+  svg.style.top = '0';
+  svg.style.pointerEvents = 'none'; // Permite clicar nas árvores por trás da linha
+  svg.style.zIndex = '5';
+  canvas.appendChild(svg);
+
+  const centralPoints = [];
 
   trees.forEach(t => {
     const filaIdx = t.fila - minFila; 
@@ -1601,14 +1651,20 @@ async function drawGabaritoMap() {
     else localYIdx = offsetY + (N - 1 - covaIdx);
 
     const posY = localYIdx * espY * pxPerMeter;
+    
+    const fusteOffset = (t.fuste > 1) ? (t.fuste - 1) * (4 * zoom) : 0;
+    const finalX = posX + padding + fusteOffset;
+    const finalY = posY + padding + fusteOffset;
+
+    // Se a árvore é o Centro, mapeia as coordenadas (o SVG opera de cima pra baixo, o CSS de baixo pra cima)
+    if (t.central) {
+      centralPoints.push({ x: finalX, y: mapHeight - finalY });
+    }
+
     const dot = document.createElement('div');
     dot.style.position = 'absolute';
-    
-    // Fustes múltiplos se distanciam mais dependendo do zoom
-    const fusteOffset = (t.fuste > 1) ? (t.fuste - 1) * (4 * zoom) : 0;
-    
-    dot.style.left = `${posX + padding + fusteOffset}px`;
-    dot.style.bottom = `${posY + padding + fusteOffset}px`;
+    dot.style.left = `${finalX}px`;
+    dot.style.bottom = `${finalY}px`;
     dot.style.width = `${dotSize}px`;
     dot.style.height = `${dotSize}px`;
     dot.style.borderRadius = '50%';
@@ -1629,7 +1685,7 @@ async function drawGabaritoMap() {
       dot.style.boxShadow = `0 0 ${6 * zoom}px rgba(41, 128, 185, 0.6)`;
       dot.style.zIndex = '20';
     } else if (DEAD_CATS.includes(t.cat)) {
-      dot.style.backgroundColor = '#111111'; 
+      dot.style.backgroundColor = '#2c3e50'; 
     } else if (FALHA_CATS.includes(t.cat)) {
       dot.style.backgroundColor = 'transparent';
       dot.style.border = `${Math.max(1, 2 * zoom)}px solid #e74c3c`; 
@@ -1639,17 +1695,13 @@ async function drawGabaritoMap() {
       dot.style.backgroundColor = '#27ae60'; 
     }
 
-    // INDICADOR DE ALTURA (HT) MEDIDA - Borda Azul/Cyan
     if (t.ht != null && !FALHA_CATS.includes(t.cat)) {
       dot.style.border = `${Math.max(1, 2 * zoom)}px solid #00ffff`;
       hasBorder = true;
     }
 
-    // INDICADOR DE OUTLIERS/FLAGS (Amarelo)
     if (t.flags && t.flags.length > 0) {
       if (hasBorder) {
-        // Se a árvore já tem borda de HT ou de Falha, cria um "anel" externo 
-        // para não apagar a informação anterior
         dot.style.outline = `${Math.max(1, 2 * zoom)}px solid #f39c12`;
         dot.style.outlineOffset = `${1 * zoom}px`;
       } else {
@@ -1657,12 +1709,49 @@ async function drawGabaritoMap() {
       }
     }
 
-    // Indicador numérico para fustes secundários
     if (t.fuste > 1) dot.textContent = t.fuste;
 
-    dot.onclick = () => showToast(`F:${t.fila} C:${t.cova} ${t.fuste > 1 ? `Fst:${t.fuste}` : ''} | DAP: ${t.dap || '-'}`);
+    // Toast revelando a numeração dupla
+    const relCova = covaMap[t.id] || t.cova;
+    dot.onclick = () => showToast(`F:${t.fila} C:${relCova} (Absoluta:${t.cova}) ${t.fuste > 1 ? `Fst:${t.fuste}` : ''} | DAP: ${t.dap || '-'}`);
     canvas.appendChild(dot);
+
+    // NUMERAÇÃO DAS BORDAS EXTERNAS
+    if (localYIdx === offsetY + N - 1 || localYIdx === offsetY) {
+      const lbl = document.createElement('div');
+      lbl.textContent = t.cova; 
+      lbl.style.position = 'absolute';
+      lbl.style.color = '#e74c3c'; 
+      lbl.style.fontSize = `${Math.max(9, 11 * zoom)}px`;
+      lbl.style.fontFamily = 'monospace';
+      lbl.style.fontWeight = 'bold';
+      lbl.style.left = `${finalX}px`;
+      lbl.style.transform = 'translateX(-50%)';
+
+      // Posiciona para cima ou para baixo evitando as árvores
+      if (localYIdx === offsetY + N - 1) { // Borda de Cima
+        lbl.style.bottom = `${finalY + (12 * zoom)}px`;
+      } else if (localYIdx === offsetY) { // Borda de Baixo
+        lbl.style.bottom = `${finalY - (22 * zoom)}px`;
+      }
+      canvas.appendChild(lbl);
+    }
   });
+
+  // DESENHA A LINHA CONECTANDO AS ÁRVORES CENTRAIS
+  if (centralPoints.length >= 2) {
+    for (let i = 0; i < centralPoints.length - 1; i++) {
+      const line = document.createElementNS(svgNS, "line");
+      line.setAttribute("x1", centralPoints[i].x);
+      line.setAttribute("y1", centralPoints[i].y);
+      line.setAttribute("x2", centralPoints[i+1].x);
+      line.setAttribute("y2", centralPoints[i+1].y);
+      line.setAttribute("stroke", "#f39c12"); // Laranja/Amarelo destque
+      line.setAttribute("stroke-width", `${Math.max(2, 4 * zoom)}`);
+      line.setAttribute("stroke-dasharray", `${6 * zoom},${4 * zoom}`); // Linha tracejada
+      svg.appendChild(line);
+    }
+  }
 
   container.appendChild(canvas);
 }
