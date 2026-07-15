@@ -1,9 +1,8 @@
 import { db, generateUUID } from './db.js';
 import { fitWeibull, weibullQuantile, getTailProb, fitCurtis, curtisResidual, robustMAD, fitIncrementBuffer } from './stats.js';
 
-// ============================================================
+
 // 1. ESTADO DA APLICACAO
-// ============================================================
 // Mantemos na memoria apenas o minimo necessario. O volume grosso
 // de dados fica no IndexedDB e e consultado sob demanda.
 const appState = {
@@ -12,7 +11,7 @@ const appState = {
   editingTreeId: null,
   selectedCat: null,
   sortOrder: 'logical', // 'logical', 'dap', 'ht', 'cat'
-  covaDisplayMode: 'relative', // 'relative' ou 'absolute'
+  covaDisplayMode: 'absolute', // 'relative' ou 'absolute'
   plotDataSource: 'atual'
 };
 
@@ -22,7 +21,7 @@ const CATEGORIES = [
   { code: 9, label: 'Dominante', key: 'dominante' },
   { code: 2, label: 'Dominada', key: 'dominada' },
   { code: 7, label: 'Ponta seca', key: 'ponta_seca' },
-  { code: 5, label: 'Bifurcada ab', key: 'bifurcada_abaixo' },
+  { code: 5, label: 'Torta', key: 'torta' },
   { code: 6, label: 'Bifurcada ac', key: 'bifurcada_acima' },
   { code: 4, label: 'Morta', key: 'morta' },
   { code: 8, label: 'Formiga', key: 'formiga' },
@@ -31,13 +30,11 @@ const CATEGORIES = [
 
 const DEAD_CATS = ['morta'];
 const FALHA_CATS = ['falha'];
-const ALIVE_CATS = ['normal', 'dominada', 'ponta_seca', 'bifurcada_abaixo', 'bifurcada_acima', 'formiga'];
-const CURTIS_EXCLUDE = ['morta', 'falha', 'quebrada', 'bifurcada_abaixo'];
+const ALIVE_CATS = ['normal', 'dominada', 'ponta_seca', 'torta', 'bifurcada_acima', 'formiga'];
+const CURTIS_EXCLUDE = ['morta', 'falha', 'quebrada', 'torta'];
 const getNoMeasureCats = () => appState.campaign?.measureDead ? ['falha'] : ['falha', 'morta'];
 
-// ============================================================
 // 2. INICIALIZACAO E ROTEAMENTO
-// ============================================================
 document.addEventListener('DOMContentLoaded', async () => {
   await initCampaign();
   setupEventDelegation();
@@ -84,9 +81,7 @@ function go(screenId) {
   // if (screenId === 'screen-settings') renderSettings();
 }
 
-// ============================================================
 // 3. TELA INICIAL (HOME) & OTIMIZACOES
-// ============================================================
 async function renderHome() {
   const homeScreen = document.getElementById('screen-home');
   
@@ -180,9 +175,7 @@ async function renderPlotList(query = '') {
     return;
   }
 
-  // =========================================================
-  // NOVIDADE: Varredura rápida de Histórico e Flags
-  // =========================================================
+  // Varredura rápida de Histórico e Flags
   const trees = await db.trees.toArray();
   const history = await db.history.toArray();
 
@@ -197,7 +190,6 @@ async function renderPlotList(query = '') {
   // Identifica quais parcelas possuem histórico atrelado
   const hasHistory = new Set();
   history.forEach(h => hasHistory.add(h.plotId));
-  // =========================================================
 
   const grouped = {};
   plots.forEach(p => {
@@ -245,7 +237,7 @@ async function renderPlotList(query = '') {
         const flagsHtml = nFlags > 0 ? `<span class="badge badge-warn" style="margin-right:6px; font-size:10px;">🚩 ${nFlags}</span>` : '';
         const histHtml = hasHistory.has(p.id) ? `<span title="Possui histórico" style="font-size:14px; margin-right:6px; opacity: 0.8;">🕒</span>` : '';
 
-        // Injeção do HTML atualizado (Removida a rotação)
+        // Injeção do HTML atualizado
         plotDiv.innerHTML = `
           <div class="plot-num" style="min-width: 45px">#${p.numero}</div>
           <div class="plot-info">
@@ -271,9 +263,7 @@ async function renderPlotList(query = '') {
   container.appendChild(fragment);
 }
 
-// ============================================================
 // 4. DELEGACAO DE EVENTOS & UTILITARIOS
-// ============================================================
 function setupEventDelegation() {
   document.body.addEventListener('click', async (e) => {
     const target = e.target.closest('[data-action]');
@@ -383,9 +373,7 @@ function debounce(func, wait) {
   };
 }
 
-// ============================================================
 // 5. UTILITARIOS GERAIS
-// ============================================================
 function showToast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg;
@@ -471,9 +459,7 @@ function parseNumber(val) {
   return isNaN(parsed) ? null : parsed;
 }
 
-// ============================================================
 // 6. TELA DE CONFIGURACOES e IMPORTACAO
-// ============================================================
 function renderSettings() {
   const screen = document.getElementById('screen-settings');
   const campaign = appState.campaign;
@@ -722,7 +708,7 @@ async function wipeAllData() {
   }
 }
 
-// Traduz a Cova Absoluta do banco para a Cova Relativa visual
+// Traduz a Cova sequencial do banco para a Cova por fila visual
 function buildCovaMap(trees) {
   const map = {};
   const filas = {};
@@ -808,8 +794,8 @@ async function renderPlot() {
         <span>Fustes</span>
         <div style="display: flex; gap: 4px;">
           <select id="display-cova" style="padding:4px; font-size:11px; border-color:var(--border); border-radius:4px; outline:none;">
-            <option value="relative" ${appState.covaDisplayMode === 'absolute' ? '' : 'selected'}>Covas: Relativas</option>
-            <option value="absolute" ${appState.covaDisplayMode === 'absolute' ? 'selected' : ''}>Covas: Absolutas</option>
+            <option value="relative" ${appState.covaDisplayMode === 'absolute' ? '' : 'selected'}>Covas: Por fila</option>
+            <option value="absolute" ${appState.covaDisplayMode === 'absolute' ? 'selected' : ''}>Covas: Sequencial</option>
           </select>
           <select id="sort-trees" style="padding:4px; font-size:11px; border-color:var(--border); border-radius:4px; outline:none;">
             <option value="logical" ${appState.sortOrder === 'logical' ? 'selected' : ''}>Ord: Fuste</option>
@@ -853,8 +839,8 @@ async function renderPlot() {
               Centro
             </label>
             <select id="t-inst" style="font-size:11px; padding:4px; border:none; background:var(--bg); border-radius:4px; color:var(--text3); outline:none;">
-              <option value="dap">DAP Padrão</option>
               <option value="fita">Fita (CAP)</option>
+              <option value="dap">DAP Padrão</option>
               <option value="suta">Suta (D1/D2)</option>
             </select>
           </div>
@@ -1015,11 +1001,8 @@ function renderTreeListHTML(trees, covaMap = {}) {
     const item = document.createElement('div');
     item.className = `tree-item ${t.cat === 'dominante' ? 'dom-highlight' : ''}`;
     
-    // ==========================================
-    // AQUI ESTÁ A LÓGICA DO PASSO 5 APLICADA:
     // Se NÃO for histórico, permite clicar. 
     // Se for histórico, bloqueia o clique (cursor normal).
-    // ==========================================
     if (!isHistory) {
       item.dataset.action = 'open-tree-form';
       item.dataset.treeId = t.id;
@@ -1068,9 +1051,7 @@ function renderTreeListHTML(trees, covaMap = {}) {
   container.innerHTML = '';
   container.appendChild(fragment);
 }
-// ============================================================
 // 8. FORMULARIO DE ARVORE E SALVAMENTO
-// ============================================================
 function buildCatGrid() {
   const grid = document.getElementById('cat-grid');
   if (!grid) return;
@@ -1132,7 +1113,6 @@ async function openTreeForm(treeId) {
     const currInst = document.getElementById('t-inst').value || 'dap';
     toggleInstrument(currInst);
 
-    // --- LÓGICA DE AUTO-PREENCHIMENTO (FILA E COVA) ---
     let nextFila = 1;
     let nextCova = 1;
 
@@ -1302,18 +1282,10 @@ async function closePlot() {
   renderHome();
 }
 
-// ============================================================
 // 9. VALIDAÇÃO DE DADOS (OUTLIERS E HISTÓRICO)
-// ============================================================
 
-// ============================================================
 // Validacao historica — roda a cada saveTree()
 // Apenas regras logicas + transicoes de categoria
-// ============================================================
-// ============================================================
-// Validação histórica — roda a cada saveTree()
-// Apenas regras lógicas + transições de categoria
-// ============================================================
 async function validateHistory(plotId) {
   const trees   = await db.trees.where('plotId').equals(plotId).toArray();
   const history = await db.history.where('plotId').equals(plotId).toArray();
@@ -1372,9 +1344,7 @@ async function validateHistory(plotId) {
     await Promise.all(updates.map(u => db.trees.update(u.id, u.changes)));
 }
 
-// ============================================================
 // Validacao biometrica — roda sob demanda (botao "Validar")
-// ============================================================
 async function validateBiometrics(plotId) {
   const trees   = await db.trees.where('plotId').equals(plotId).toArray();
   const history = await db.history.where('plotId').equals(plotId).toArray();
@@ -1512,14 +1482,11 @@ async function exportData() {
   
   showToast('CSV exportado ✓');
 }
-// ============================================================
 // 10. INFORMACOES DA PARCELA
-// ============================================================
 async function showPlotInfo() {
   const plot = await db.plots.get(appState.currentPlotId);
   if (!plot) return;
 
-  // CORREÇÃO: Função auxiliar declarada no topo do escopo
   const infoRow = (label, val) => `<div><div class="card-label">${label}</div><div class="card-val">${val}</div></div>`;
 
   // 1. Busca os dados ATUAIS
@@ -1594,9 +1561,7 @@ async function showPlotInfo() {
   document.getElementById('modal-plot-info').classList.remove('hidden');
 }
 
-// ============================================================
 // 11. GABARITO VISUAL DA PARCELA (ATUAL E HISTÓRICO)
-// ============================================================
 async function showGabarito() {
   const plot = await db.plots.get(appState.currentPlotId);
   if (!plot) return;
