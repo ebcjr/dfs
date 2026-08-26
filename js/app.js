@@ -453,6 +453,15 @@ function customConfirm(title, message, confirmText = 'Sim', cancelText = 'Cancel
   });
 }
 
+function formatLocalTime(ms) {
+  if (!ms) return '';
+  const d = new Date(ms);
+  const pad = (n) => n.toString().padStart(2, '0');
+  
+  // Retorna no formato YYYY-MM-DD HH:MM:SS
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 async function openEditCoordsForm(plotId) {
   const plot = await db.plots.get(plotId);
   if (!plot) return;
@@ -1218,9 +1227,9 @@ async function saveTree() {
   const cova = parseInt(document.getElementById('t-cova').value);
   const fuste = parseInt(document.getElementById('t-fuste').value) || 1;
   const cat = appState.selectedCat;
-  const central = document.getElementById('t-central').checked;
+  const central = document.getElementById('t-central').checked; 
   
-  // LEITURA DO INSTRUMENTO E CONVERSÃO MATEMÁTICA
+  // leitura e conversao
   const inst = document.getElementById('t-inst').value;
   let dap = null, med1 = null, med2 = null;
 
@@ -1230,13 +1239,13 @@ async function saveTree() {
   } else if (inst === 'fita') {
     const capRaw = document.getElementById('t-cap').value;
     med1 = capRaw !== '' ? parseFloat(capRaw.replace(',', '.')) : null;
-    if (med1 != null) dap = med1 / Math.PI; // Conversão CAP -> DAP
+    if (med1 != null) dap = med1 / Math.PI;
   } else if (inst === 'suta') {
     const d1Raw = document.getElementById('t-dap1').value;
     const d2Raw = document.getElementById('t-dap2').value;
     med1 = d1Raw !== '' ? parseFloat(d1Raw.replace(',', '.')) : null;
     med2 = d2Raw !== '' ? parseFloat(d2Raw.replace(',', '.')) : null;
-    if (med1 != null && med2 != null) dap = (med1 + med2) / 2; // Média Suta
+    if (med1 != null && med2 != null) dap = (med1 + med2) / 2;
     else if (med1 != null) dap = med1;
     else if (med2 != null) dap = med2;
   }
@@ -1253,12 +1262,34 @@ async function saveTree() {
     if (inst === 'suta' && (med1 == null || med2 == null)) return showToast('Informe DAP 1 e DAP 2');
   }
 
+  // Timestamps
+  let tsDAP = null;
+  let tsHT = null;
+  const now = Date.now();
+
+  if (appState.editingTreeId) {
+    const existingTree = await db.trees.get(appState.editingTreeId);
+    if (existingTree) {
+      tsDAP = existingTree.tsDAP || null;
+      tsHT = existingTree.tsHT || null;
+      // atualiza o tempo se o valor foi recem adicionado ou alterado nesta edicao
+      if (dap != null && dap !== existingTree.dap) tsDAP = now;
+      if (ht != null && ht !== existingTree.ht) tsHT = now;
+    }
+  } else {
+    // Nova arvore
+    if (dap != null) tsDAP = now;
+    if (ht != null) tsHT = now;
+  }
+
   const treeData = {
     plotId: appState.currentPlotId,
     fila, cova, fuste, dap, ht, cat,
-    inst, med1, med2, central, // Salva os dados brutos e o instrumento
+    inst, med1, med2, central, 
     sync_status: 'pending',
-    ts: Date.now()
+    
+    tsDAP: tsDAP,       // Timestamp exclusivo da medicao do DAP/CAP
+    tsHT: tsHT          // Timestamp exclusivo da medicao da Altura
   };
 
   if (appState.editingTreeId) {
@@ -1278,9 +1309,9 @@ async function saveTree() {
     document.getElementById('t-cap').value = '';
     document.getElementById('t-dap1').value = '';
     document.getElementById('t-dap2').value = '';
-    document.getElementById('t-ht').value = '';         
+    document.getElementById('t-ht').value = '';
+    document.getElementById('t-central').checked = false;         
     
-    // Foca na input correta dependendo do instrumento
     setTimeout(() => {
       if (inst === 'dap') { const f = document.getElementById('t-dap'); if(f) f.focus(); }
       if (inst === 'fita') { const f = document.getElementById('t-cap'); if(f) f.focus(); }
@@ -1289,7 +1320,6 @@ async function saveTree() {
   }
 
   showToast('Salvo ✓');
-  await validateHistory(appState.currentPlotId);
   await refreshPlotData();
 }
 
@@ -1330,7 +1360,10 @@ async function findDominants() {
 }
 
 async function closePlot() {
-  await db.plots.update(appState.currentPlotId, { status: 'done' });
+  await db.plots.update(appState.currentPlotId, { 
+    status: 'done',
+    tsFinalizacao: Date.now() // Registra o fechamento da parcela
+  });
   showToast('Parcela concluída ✓');
   go('screen-home');
   renderHome();
@@ -1383,7 +1416,7 @@ async function validateHistory(plotId) {
       if (ALIVE_CATS.includes(h.cat) && FALHA_CATS.includes(t.cat))
         flags.push({ type: 'warn', source: 'history', msg: 'Era viva → virou falha?' });
 
-      // NOVA REGRA: Obrigatoriedade de HT em fustes medidos anteriormente
+      // Obrigatoriedade de HT em fustes medidos anteriormente
       if (h.ht != null && t.ht == null && !noMeasure.includes(t.cat)) {
         flags.push({ type: 'warn', source: 'history', msg: `Medir HT (histórico: ${h.ht.toFixed(1)} m)` });
       }
@@ -1492,40 +1525,82 @@ async function exportData() {
   const plotMap = {};
   plots.forEach(p => plotMap[p.id] = p);
 
-  // Cabecalho atualizado com os dados do instrumento
-  const rows = [['campanha', 'ano', 'parcela', 'fazenda', 'talhao', 'x', 'y', 'rotacao', 'area', 'fila', 'cova', 'fuste', 'instrumento', 'medida_1', 'medida_2', 'dap', 'ht', 'categoria', 'sync_status', 'timestamp'].join(';')];
+  // === dplyr-style: enriquecer -> ordenar ===
+  const dados = trees
+    .map(t => {
+      const plot = plotMap[t.plotId] || {};
+      return {
+        ...t,
+        fazenda: plot.fazenda || '',
+        talhao: plot.talhao || '',
+        parcela: plot.numero || t.plotId,
+        x: plot.x,
+        y: plot.y,
+        rotacao: plot.rotacao,
+        area: plot.area,
+        tsFinalizacao: plot.tsFinalizacao
+      };
+    })
+    .sort((a, b) => {
+      const cmpFazenda = (a.fazenda || '').localeCompare(b.fazenda || '');
+      if (cmpFazenda !== 0) return cmpFazenda;
 
-  trees.forEach(t => {
-    const plot = plotMap[t.plotId] || {};
-    
+      const cmpTalhao = (a.talhao || '').localeCompare(b.talhao || '');
+      if (cmpTalhao !== 0) return cmpTalhao;
+
+      const cmpParcela = String(a.parcela).localeCompare(String(b.parcela));
+      if (cmpParcela !== 0) return cmpParcela;
+
+      const cmpFila = (a.fila ?? 0) - (b.fila ?? 0);
+      if (cmpFila !== 0) return cmpFila;
+
+      const cmpCova = (a.cova ?? 0) - (b.cova ?? 0);
+      if (cmpCova !== 0) return cmpCova;
+
+      return (a.fuste ?? 0) - (b.fuste ?? 0);
+    });
+
+  // === header com parcela logo após fazenda/talhao ===
+  const rows = [[
+    'campanha', 'ano', 'fazenda', 'talhao', 'parcela',
+    'x', 'y', 'rotacao', 'area',
+    'fila', 'cova', 'fuste',
+    'instrumento', 'medida_1', 'medida_2', 'dap', 'ht',
+    'categoria', 'sync_status',
+    'tsDAP', 'tsHT', 'tsFim'
+  ].join(';')];
+
+  dados.forEach(t => {
     const instStr = t.inst || 'dap';
     const m1Str = t.med1 != null ? t.med1.toString().replace('.', ',') : '';
     const m2Str = t.med2 != null ? t.med2.toString().replace('.', ',') : '';
-    // Exporta o DAP com 2 casas para preservar a divisão por PI do CAP
     const dapStr = t.dap != null ? t.dap.toFixed(2).replace('.', ',') : '';
     const htStr = t.ht != null ? t.ht.toString().replace('.', ',') : '';
-    const tsStr = new Date(t.ts || Date.now()).toISOString();
+
+    const tsDapStr = formatLocalTime(t.tsDAP);
+    const tsHtStr = formatLocalTime(t.tsHT);
+    const tsFinStr = formatLocalTime(t.tsFinalizacao);
 
     rows.push([
-      appState.campaign.name, 
+      appState.campaign.name,
       appState.campaign.year,
-      plot.numero || t.plotId,
-      plot.fazenda || '', 
-      plot.talhao || '',
-      plot.x ? plot.x.toString().replace('.', ',') : '',
-      plot.y ? plot.y.toString().replace('.', ',') : '',
-      plot.rotacao ? plot.rotacao.toString().replace('.', ',') : '',
-      plot.area ? plot.area.toString().replace('.', ',') : '',
+      t.fazenda,
+      t.talhao,
+      t.parcela,
+      t.x ? t.x.toString().replace('.', ',') : '',
+      t.y ? t.y.toString().replace('.', ',') : '',
+      t.rotacao ? t.rotacao.toString().replace('.', ',') : '',
+      t.area ? t.area.toString().replace('.', ',') : '',
       t.fila, t.cova, t.fuste,
-      instStr, m1Str, m2Str, dapStr, htStr, t.cat, 
-      t.sync_status, tsStr
+      instStr, m1Str, m2Str, dapStr, htStr, t.cat,
+      t.sync_status, tsDapStr, tsHtStr, tsFinStr
     ].join(';'));
   });
 
   const csvContent = rows.join('\n');
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
-  
+
   const a = document.createElement('a');
   a.href = url;
   a.download = `parcelas_${appState.campaign.name || 'export'}_${Date.now()}.csv`;
@@ -1533,7 +1608,7 @@ async function exportData() {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  
+
   showToast('CSV exportado ✓');
 }
 // 10. INFORMACOES DA PARCELA
