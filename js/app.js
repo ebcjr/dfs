@@ -94,7 +94,7 @@ async function renderHome() {
   homeScreen.innerHTML = `
     <div class="topbar" style="display: flex; justify-content: space-between; align-items: center;">
       <div>
-        <div class="topbar-title">DendroFS 1.11</div>
+        <div class="topbar-title">DendroFS 1.11 ebcjr</div>
         <div class="topbar-sub" id="home-campaign-name">${appState.campaign.name || 'Sem campanha'}</div>
       </div>
       
