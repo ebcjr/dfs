@@ -94,7 +94,7 @@ async function renderHome() {
   homeScreen.innerHTML = `
     <div class="topbar" style="display: flex; justify-content: space-between; align-items: center;">
       <div>
-        <div class="topbar-title">DendroFS 1.1</div>
+        <div class="topbar-title">DendroFS 1.11</div>
         <div class="topbar-sub" id="home-campaign-name">${appState.campaign.name || 'Sem campanha'}</div>
       </div>
       
@@ -140,6 +140,21 @@ async function renderHome() {
         <div class="field-row" style="margin-top:14px">
           <button class="btn btn-secondary btn-sm" data-action="close-plot-form">Cancelar</button>
           <button class="btn btn-primary btn-sm" data-action="save-new-plot">Salvar</button>
+        </div>
+      </div>
+    </div>
+    
+    <div class="modal-overlay hidden" id="modal-edit-coords" style="z-index: 2000;">
+      <div class="modal">
+        <div class="modal-title" id="mec-title">Editar Coordenadas</div>
+        <input type="hidden" id="mec-plot-id">
+        <div class="field-row">
+          <div class="field"><label>Coord. X</label><input type="number" id="mec-x" inputmode="decimal"></div>
+          <div class="field"><label>Coord. Y</label><input type="number" id="mec-y" inputmode="decimal"></div>
+        </div>
+        <div class="field-row" style="margin-top:14px">
+          <button class="btn btn-secondary btn-sm" data-action="close-edit-coords">Cancelar</button>
+          <button class="btn btn-primary btn-sm" data-action="save-edit-coords">Salvar</button>
         </div>
       </div>
     </div>
@@ -242,10 +257,11 @@ async function renderPlotList(query = '') {
           <div class="plot-num" style="min-width: 45px">#${p.numero}</div>
           <div class="plot-info">
             <div class="plot-meta" style="margin-top:0">
-              ${p.x != null && p.y != null ? `x: ${p.x}<br>y: ${p.y}` : ''}
+              ${p.x != null && p.y != null ? `x: ${p.x}<br>y: ${p.y}` : 'Sem coordenadas'}
             </div>
           </div>
           <div class="plot-right" style="display:flex; align-items:center;">
+            <button class="btn-icon" data-action="edit-plot-coords" data-plot-id="${p.id}" style="font-size:14px; margin-right:8px; padding:4px;" title="Editar Coordenadas">✏️</button>
             ${flagsHtml}
             ${histHtml}
             <span class="badge ${badgeClass}">${statusLabel}</span>
@@ -298,7 +314,12 @@ function setupEventDelegation() {
       go('screen-plot');
       renderPlot();
     }
-    // AÇÕES DAS ABAS DA PARCELA
+    
+    // acoes de edicao de Coordenadas
+    else if (action === 'edit-plot-coords') { openEditCoordsForm(target.dataset.plotId); }
+    else if (action === 'close-edit-coords') { document.getElementById('modal-edit-coords').classList.add('hidden'); }
+    else if (action === 'save-edit-coords') { await savePlotCoords(); }
+    // acoes das abas da parcela
     else if (action === 'tab-atual') { appState.plotDataSource = 'atual'; await renderPlot(); }
     else if (action === 'tab-historico') { appState.plotDataSource = 'historico'; await renderPlot(); }
     // Acoes de arvore
@@ -430,6 +451,39 @@ function customConfirm(title, message, confirmText = 'Sim', cancelText = 'Cancel
     overlay.appendChild(box);
     document.body.appendChild(overlay);
   });
+}
+
+async function openEditCoordsForm(plotId) {
+  const plot = await db.plots.get(plotId);
+  if (!plot) return;
+  
+  document.getElementById('mec-plot-id').value = plot.id;
+  document.getElementById('mec-title').textContent = `Editar Coord. - Parcela ${plot.numero}`;
+  document.getElementById('mec-x').value = plot.x != null ? plot.x : '';
+  document.getElementById('mec-y').value = plot.y != null ? plot.y : '';
+  
+  document.getElementById('modal-edit-coords').classList.remove('hidden');
+}
+
+async function savePlotCoords() {
+  const plotId = document.getElementById('mec-plot-id').value;
+  const xRaw = document.getElementById('mec-x').value;
+  const yRaw = document.getElementById('mec-y').value;
+  
+  // Converte para float lidando com virgula ou ponto
+  const newX = xRaw !== '' ? parseFloat(xRaw.replace(',', '.')) : null;
+  const newY = yRaw !== '' ? parseFloat(yRaw.replace(',', '.')) : null;
+
+  await db.plots.update(plotId, {
+    x: newX,
+    y: newY
+  });
+
+  document.getElementById('modal-edit-coords').classList.add('hidden');
+  showToast('Coordenadas atualizadas ✓');
+  
+  // Recarrega a lista preservando a busca atual
+  await renderPlotList(document.getElementById('search-input').value);
 }
 
 function toggleInstrument(inst) {
