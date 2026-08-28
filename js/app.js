@@ -94,7 +94,7 @@ async function renderHome() {
   homeScreen.innerHTML = `
     <div class="topbar" style="display: flex; justify-content: space-between; align-items: center;">
       <div>
-        <div class="topbar-title">DendroFS 1.11 ebcjr</div>
+        <div class="topbar-title">DendroFS 1.12 ebcjr</div>
         <div class="topbar-sub" id="home-campaign-name">${appState.campaign.name || 'Sem campanha'}</div>
       </div>
       
@@ -331,7 +331,8 @@ function setupEventDelegation() {
       document.getElementById('modal-tree').classList.add('hidden');
     } 
     else if (action === 'select-cat') { selectCat(target.dataset.catKey); } 
-    else if (action === 'save-tree') { await saveTree(); }
+    else if (action === 'save-tree') { await saveTree('next-cova'); }
+    else if (action === 'save-tree-fuste') { await saveTree('next-fuste'); }
     else if (action === 'delete-tree') { await deleteTree(); }
     
     // Acoes de Zoom
@@ -935,9 +936,10 @@ async function renderPlot() {
         </div>
 
         <div class="field"><label>Categoria</label><div class="cat-grid" id="cat-grid"></div></div>
-        <div class="field-row" style="margin-top:14px">
-          <button class="btn btn-secondary btn-sm" data-action="close-tree-form">Cancelar</button>
-          <button class="btn btn-primary btn-sm" data-action="save-tree">Salvar</button>
+        <div class="field-row" style="margin-top:14px; display:flex; gap:8px;">
+          <button class="btn btn-secondary btn-sm" data-action="close-tree-form" style="flex:1;">Cancelar</button>
+          <button class="btn btn-primary btn-sm" data-action="save-tree-fuste" style="flex:1.5;">+ Fuste</button>
+          <button class="btn btn-primary btn-sm" data-action="save-tree" style="flex:1.5;">+ Cova</button>
         </div>
         <div id="modal-delete-btn" class="hidden" style="margin-top:8px">
           <button class="btn btn-danger btn-sm" data-action="delete-tree" style="width:100%">Excluir medição</button>
@@ -1222,14 +1224,14 @@ async function deleteTree() {
   await refreshPlotData();
 }
 
-async function saveTree() {
+async function saveTree(mode = 'next-cova') {
   const fila = parseInt(document.getElementById('t-fila').value);
   const cova = parseInt(document.getElementById('t-cova').value);
   const fuste = parseInt(document.getElementById('t-fuste').value) || 1;
   const cat = appState.selectedCat;
   const central = document.getElementById('t-central').checked; 
   
-  // leitura e conversao
+  // LEITURA DO INSTRUMENTO E CONVERSÃO MATEMÁTICA
   const inst = document.getElementById('t-inst').value;
   let dap = null, med1 = null, med2 = null;
 
@@ -1239,13 +1241,13 @@ async function saveTree() {
   } else if (inst === 'fita') {
     const capRaw = document.getElementById('t-cap').value;
     med1 = capRaw !== '' ? parseFloat(capRaw.replace(',', '.')) : null;
-    if (med1 != null) dap = med1 / Math.PI;
+    if (med1 != null) dap = med1 / Math.PI; // Conversão CAP -> DAP
   } else if (inst === 'suta') {
     const d1Raw = document.getElementById('t-dap1').value;
     const d2Raw = document.getElementById('t-dap2').value;
     med1 = d1Raw !== '' ? parseFloat(d1Raw.replace(',', '.')) : null;
     med2 = d2Raw !== '' ? parseFloat(d2Raw.replace(',', '.')) : null;
-    if (med1 != null && med2 != null) dap = (med1 + med2) / 2;
+    if (med1 != null && med2 != null) dap = (med1 + med2) / 2; // Média Suta
     else if (med1 != null) dap = med1;
     else if (med2 != null) dap = med2;
   }
@@ -1262,7 +1264,7 @@ async function saveTree() {
     if (inst === 'suta' && (med1 == null || med2 == null)) return showToast('Informe DAP 1 e DAP 2');
   }
 
-  // Timestamps
+  // LÓGICA DE RASTREAMENTO DE TEMPO (TIMESTAMPS GRANULARES)
   let tsDAP = null;
   let tsHT = null;
   const now = Date.now();
@@ -1272,12 +1274,12 @@ async function saveTree() {
     if (existingTree) {
       tsDAP = existingTree.tsDAP || null;
       tsHT = existingTree.tsHT || null;
-      // atualiza o tempo se o valor foi recem adicionado ou alterado nesta edicao
+      // Só atualiza o tempo se o valor foi recém-adicionado ou alterado nesta edição
       if (dap != null && dap !== existingTree.dap) tsDAP = now;
       if (ht != null && ht !== existingTree.ht) tsHT = now;
     }
   } else {
-    // Nova arvore
+    // Nova árvore
     if (dap != null) tsDAP = now;
     if (ht != null) tsHT = now;
   }
@@ -1287,24 +1289,35 @@ async function saveTree() {
     fila, cova, fuste, dap, ht, cat,
     inst, med1, med2, central, 
     sync_status: 'pending',
-    
-    tsDAP: tsDAP,       // Timestamp exclusivo da medicao do DAP/CAP
-    tsHT: tsHT          // Timestamp exclusivo da medicao da Altura
+    tsDAP: tsDAP,       // Timestamp exclusivo da medição do DAP/CAP
+    tsHT: tsHT          // Timestamp exclusivo da medição da Altura
   };
 
   if (appState.editingTreeId) {
+    // ESTÁ EDITANDO: Atualiza no banco, limpa o ID e fecha o modal
     await db.trees.update(appState.editingTreeId, treeData);
     appState.editingTreeId = null;
     document.getElementById('modal-tree').classList.add('hidden');
   } else {
+    // É UMA NOVA ÁRVORE: Verifica duplicidade e insere no banco
     const dup = await db.trees.where({plotId: appState.currentPlotId, fila: fila, cova: cova, fuste: fuste}).first();
     if (dup) return showToast('Fila-Cova-Fuste já registrado nesta parcela');
     
     treeData.id = generateUUID();
     await db.trees.add(treeData);
 
-    document.getElementById('t-cova').value = cova + 1; 
-    document.getElementById('t-fuste').value = 1;       
+    // ==========================================
+    // LÓGICA DE AUTO-INCREMENTO (O MODAL CONTINUA ABERTO)
+    // ==========================================
+    if (mode === 'next-fuste') {
+      document.getElementById('t-fuste').value = fuste + 1;
+      // A cova se mantém intacta
+    } else {
+      document.getElementById('t-cova').value = cova + 1; 
+      document.getElementById('t-fuste').value = 1;       
+    }
+
+    // Limpeza dos campos e *checkboxes*
     document.getElementById('t-dap').value = '';
     document.getElementById('t-cap').value = '';
     document.getElementById('t-dap1').value = '';
@@ -1312,6 +1325,7 @@ async function saveTree() {
     document.getElementById('t-ht').value = '';
     document.getElementById('t-central').checked = false;         
     
+    // Foca na input correta dependendo do instrumento utilizado
     setTimeout(() => {
       if (inst === 'dap') { const f = document.getElementById('t-dap'); if(f) f.focus(); }
       if (inst === 'fita') { const f = document.getElementById('t-cap'); if(f) f.focus(); }
@@ -1320,7 +1334,7 @@ async function saveTree() {
   }
 
   showToast('Salvo ✓');
-  await refreshPlotData();
+  await refreshPlotData(); // Atualiza a tela cirurgicamente sem fechar modais
 }
 
 async function findDominants() {
