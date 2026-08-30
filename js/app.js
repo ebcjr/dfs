@@ -1071,19 +1071,19 @@ async function renderPlot() {
           </div>
         </div>
 
-        <div class="field-row3">
+        <div class="field-row3" style="display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 8px;">
           <div class="field">
             <label>Fila</label>
             <div style="display:flex; align-items:stretch; height:34px; border:1px solid var(--border); border-radius:4px; overflow:hidden;">
-              <button data-action="dec-fila" style="width:40px; flex-shrink:0; background:#eef2f3; border:none; border-right:1px solid var(--border); color:var(--text1); font-weight:bold; font-size:18px; cursor:pointer; margin:0;">-</button>
+              <button data-action="dec-fila" style="width:32px; flex-shrink:0; background:#eef2f3; border:none; border-right:1px solid var(--border); color:var(--text1); font-weight:bold; font-size:16px; cursor:pointer; margin:0; padding:0;">-</button>
               
-              <input type="number" id="t-fila" inputmode="numeric" min="1" style="border:none; border-radius:0; text-align:center; flex:1; min-width:30px; margin:0; outline:none; font-size:14px;">
+              <input type="number" id="t-fila" inputmode="numeric" min="1" style="border:none; border-radius:0; text-align:center; flex:1; min-width:0; margin:0; padding:0; outline:none; font-size:14px;">
               
-              <button data-action="inc-fila" style="width:40px; flex-shrink:0; background:#eef2f3; border:none; border-left:1px solid var(--border); color:var(--text1); font-weight:bold; font-size:18px; cursor:pointer; margin:0;">+</button>
+              <button data-action="inc-fila" style="width:32px; flex-shrink:0; background:#eef2f3; border:none; border-left:1px solid var(--border); color:var(--text1); font-weight:bold; font-size:16px; cursor:pointer; margin:0; padding:0;">+</button>
             </div>
           </div>
-          <div class="field"><label>Cova</label><input type="number" id="t-cova" inputmode="numeric" min="1"></div>
-          <div class="field"><label>Fuste</label><input type="number" id="t-fuste" inputmode="numeric" min="1" value="1"></div>
+          <div class="field"><label>Cova</label><input type="number" id="t-cova" inputmode="numeric" min="1" style="height:34px; width:100%; box-sizing:border-box;"></div>
+          <div class="field"><label>Fuste</label><input type="number" id="t-fuste" inputmode="numeric" min="1" value="1" style="height:34px; width:100%; box-sizing:border-box;"></div>
         </div>
         
         <div class="field-row">
@@ -1105,7 +1105,10 @@ async function renderPlot() {
           <div class="field"><label>HT (m)</label><input type="number" id="t-ht" inputmode="decimal" step="0.1"></div>
         </div>
 
-        <div class="field"><label>Categoria</label><div class="cat-grid" id="cat-grid"></div></div>
+        <div class="field">
+          <label>Categoria</label>
+          <div class="cat-grid" id="cat-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;"></div>
+        </div>
         <div class="field-row" style="margin-top:14px; display:flex; gap:8px;">
           <button class="btn btn-secondary btn-sm" data-action="close-tree-form" style="flex:1;">Cancelar</button>
           <button class="btn btn-primary btn-sm" id="btn-add-fuste" data-action="save-tree-fuste" style="flex:1; background:#2980b9; border-color:#2980b9; color:#fff;">+ Fuste</button>
