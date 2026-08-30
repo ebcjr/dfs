@@ -24,15 +24,18 @@ const CATEGORIES = [
   { code: 5, label: 'Torta', key: 'torta' },
   { code: 6, label: 'Bifurcada ac', key: 'bifurcada_acima' },
   { code: 4, label: 'Morta', key: 'morta' },
-  { code: 8, label: 'Formiga', key: 'formiga' },
-  { code: 3, label: 'Quebrada', key: 'quebrada' }
+  { code: 8, label: 'Morta quebrada', key: 'mq' },
+  { code: 3, label: 'Quebrada', key: 'quebrada' },
+  { code: 10, label: 'Cancro', key: 'cancro' },
+  { code: 11, label: 'Inclinada', key: 'inclinada' },
+  { code: 12, label: 'Caida', key: 'caida' }
 ];
 
-const DEAD_CATS = ['morta'];
+const DEAD_CATS = ['morta','mq','caida'];
 const FALHA_CATS = ['falha'];
-const ALIVE_CATS = ['normal', 'dominada', 'ponta_seca', 'torta', 'bifurcada_acima', 'formiga'];
-const CURTIS_EXCLUDE = ['morta', 'falha', 'quebrada', 'torta'];
-const getNoMeasureCats = () => appState.campaign?.measureDead ? ['falha'] : ['falha', 'morta'];
+const ALIVE_CATS = ['normal', 'dominada', 'ponta_seca', 'torta', 'bifurcada_acima','inclinada' ,'cancro'];
+const CURTIS_EXCLUDE = ['morta', 'falha', 'quebrada', 'torta','mq','inclinada','caida'];
+const getNoMeasureCats = () => appState.campaign?.measureDead ? ['falha'] : ['falha', 'morta','mq'];
 
 // 2. INICIALIZACAO E ROTEAMENTO
 document.addEventListener('DOMContentLoaded', async () => {
@@ -94,7 +97,7 @@ async function renderHome() {
   homeScreen.innerHTML = `
     <div class="topbar" style="display: flex; justify-content: space-between; align-items: center;">
       <div>
-        <div class="topbar-title">DendroFS 1.12 ebcjr</div>
+        <div class="topbar-title">DendroFS 1.13 ebcjr</div>
         <div class="topbar-sub" id="home-campaign-name">${appState.campaign.name || 'Sem campanha'}</div>
       </div>
       
@@ -314,6 +317,9 @@ function setupEventDelegation() {
       go('screen-plot');
       renderPlot();
     }
+    else if (action === 'trigger-import-plots') { document.getElementById('import-plots-input').click(); } 
+    else if (action === 'trigger-import-history') { document.getElementById('import-hist-input').click(); } 
+    else if (action === 'trigger-import-backup') { document.getElementById('import-backup-input').click(); }
     
     // acoes de edicao de Coordenadas
     else if (action === 'edit-plot-coords') { openEditCoordsForm(target.dataset.plotId); }
@@ -333,7 +339,17 @@ function setupEventDelegation() {
     else if (action === 'select-cat') { selectCat(target.dataset.catKey); } 
     else if (action === 'save-tree') { await saveTree('next-cova'); }
     else if (action === 'save-tree-fuste') { await saveTree('next-fuste'); }
+    
     else if (action === 'delete-tree') { await deleteTree(); }
+    else if (action === 'inc-fila') {
+      const f = document.getElementById('t-fila');
+      f.value = (parseInt(f.value) || 0) + 1;
+    }
+    else if (action === 'dec-fila') {
+      const f = document.getElementById('t-fila');
+      const val = (parseInt(f.value) || 0) - 1;
+      f.value = val < 1 ? 1 : val;
+    }
     
     // Acoes de Zoom
     else if (action === 'zoom-in') {
@@ -401,6 +417,137 @@ function showToast(msg) {
   t.textContent = msg;
   t.style.display = 'block';
   setTimeout(() => { t.style.display = 'none'; }, 2500);
+}
+
+function parseDateSafe(dateStr) {
+  if (!dateStr) return null;
+  let d = new Date(dateStr);
+  if (!isNaN(d.getTime())) return d.getTime();
+  
+  const parts = dateStr.split(/[\s/:-]+/);
+  if (parts.length >= 3) {
+     d = new Date(parts[2], parts[1] - 1, parts[0], parts[3]||0, parts[4]||0, parts[5]||0);
+     if (!isNaN(d.getTime())) return d.getTime();
+  }
+  return null;
+}
+
+async function handleImportBackup(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  showToast('Processando restauração...');
+
+  const reader = new FileReader();
+  reader.onload = async (event) => {
+    try {
+      const lines = event.target.result.trim().split(/\r?\n/);
+      const sep = lines[0].includes(';') ? ';' : ',';
+      const headers = lines[0].split(sep).map(h => h.trim().toLowerCase());
+      const idx = (k) => headers.indexOf(k);
+
+      const plotsMap = new Map();
+      const treesRows = [];
+      const plotIdsInCsv = new Set();
+
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(sep);
+        if (cols.length < 15) continue; 
+
+        const fazenda = (cols[idx('fazenda')] || '').trim();
+        const talhao = (cols[idx('talhao')] || '').trim();
+        const parcela = (cols[idx('parcela')] || '').trim();
+
+        if (!parcela) continue;
+
+        // Reconstrói a chave biológica única da parcela
+        const plotId = `${fazenda}-${talhao}-${parcela}`.toLowerCase().replace(/\s+/g, '');
+        plotIdsInCsv.add(plotId);
+
+        // Agrupa os metadados da parcela
+        if (!plotsMap.has(plotId)) {
+          plotsMap.set(plotId, {
+            id: plotId,
+            campaignId: appState.campaign?.id || 'restored-campaign',
+            numero: parcela,
+            fazenda: fazenda,
+            talhao: talhao,
+            x: parseNumber(cols[idx('x')]),
+            y: parseNumber(cols[idx('y')]),
+            rotacao: parseNumber(cols[idx('rotacao')]),
+            area: parseNumber(cols[idx('area')]),
+            tsFinalizacao: parseDateSafe(cols[idx('momentofinalizacao')]),
+            status: 'active'
+          });
+        }
+
+        // Agrupa as medidas da árvore
+        treesRows.push({
+          plotId: plotId,
+          fila: parseInt(cols[idx('fila')]),
+          cova: parseInt(cols[idx('cova')]),
+          fuste: parseInt(cols[idx('fuste')]) || 1,
+          inst: cols[idx('instrumento')] || 'dap',
+          med1: parseNumber(cols[idx('medida_1')]),
+          med2: parseNumber(cols[idx('medida_2')]),
+          dap: parseNumber(cols[idx('dap')]),
+          ht: parseNumber(cols[idx('ht')]),
+          cat: cols[idx('categoria')],
+          sync_status: cols[idx('sync_status')] || 'pending',
+          tsDAP: parseDateSafe(cols[idx('momentomedicaodap')]),
+          tsHT: parseDateSafe(cols[idx('momentomedicaoht')])
+        });
+      }
+
+      // Busca as árvores que já existem no banco local para estas parcelas
+      const treeLookup = new Map();
+      for (const pId of plotIdsInCsv) {
+        const existingInPlot = await db.trees.where('plotId').equals(pId).toArray();
+        existingInPlot.forEach(t => {
+          treeLookup.set(`${t.plotId}-${t.fila}-${t.cova}-${t.fuste}`, t);
+        });
+      }
+
+      const treesToPut = [];
+      
+      // Mescla os dados: atualiza as existentes ou cria as novas
+      treesRows.forEach(row => {
+        const treeKey = `${row.plotId}-${row.fila}-${row.cova}-${row.fuste}`;
+        const existing = treeLookup.get(treeKey);
+        
+        if (existing) {
+          treesToPut.push({
+            ...existing,
+            ...row,
+            id: existing.id // Trava o ID original interno do Dexie
+          });
+        } else {
+          treesToPut.push({
+            ...row,
+            id: generateUUID(),
+            ts: Date.now()
+          });
+        }
+      });
+
+      // Salva em lote usando o motor assíncrono do Dexie
+      await db.plots.bulkPut(Array.from(plotsMap.values()));
+      await db.trees.bulkPut(treesToPut);
+
+      showToast(`Sucesso! ${plotsMap.size} parcelas restauradas.`);
+      e.target.value = '';
+      
+      // Se estiver com uma parcela aberta, recarrega a tela para mostrar os dados injetados
+      if (appState.currentPlotId) {
+        await refreshPlotData();
+      }
+      
+    } catch (err) {
+      showToast('Erro ao restaurar backup. Verifique o CSV.');
+      console.error(err);
+    }
+  };
+  reader.readAsText(file);
 }
 
 function customConfirm(title, message, confirmText = 'Sim', cancelText = 'Cancelar') {
@@ -569,6 +716,16 @@ function renderSettings() {
         <input type="file" id="import-hist-input" accept=".csv,.CSV" class="hidden">
       </div>
       
+      <div class="sec">Restaurar Backup / Continuar Coleta</div>
+      <div class="card">
+        <p style="font-size:13px;color:var(--text2);margin-bottom:12px">Importe o <b>CSV Exportado</b> por este app para retomar medições incompletas ou restaurar dados.</p>
+        <div class="file-drop" data-action="trigger-import-backup">
+          <div style="font-size:24px;margin-bottom:6px">🔄</div>
+          <div>Toque para importar CSV Exportado</div>
+        </div>
+        <input type="file" id="import-backup-input" accept=".csv,.CSV" class="hidden">
+      </div>
+      
       <div class="sec">Exportar dados</div>
       <div class="card">
         <p style="font-size:13px;color:var(--text2);margin-bottom:12px">Exporta todas as medições desta campanha como CSV.</p>
@@ -586,6 +743,7 @@ function renderSettings() {
   // Anexa os eventos de mudanca de arquivo diretamente apos renderizar
   document.getElementById('import-plots-input').addEventListener('change', handleImportPlots);
   document.getElementById('import-hist-input').addEventListener('change', handleImportHistory);
+  document.getElementById('import-backup-input').addEventListener('change', handleImportBackup);
 }
 
 async function saveCampaign() {
@@ -895,7 +1053,10 @@ async function renderPlot() {
       <div class="modal" id="modal-tree-inner">
         
         <div class="modal-title" style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-          <span id="modal-tree-title-text" style="white-space:nowrap;">Novo Fuste</span>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span id="modal-tree-title-text" style="white-space:nowrap;">Novo Fuste</span>
+            <span id="t-relative-cova" style="display:none; background:#ccc; color:#000; padding:2px 6px; border:1px solid #999; border-radius:2px; font-size:12px; font-weight:600; white-space:nowrap;"></span>
+          </div>
           
           <div style="display:flex; align-items:center; gap:8px;">
             <label style="display:flex; align-items:center; gap:4px; font-size:11px; color:var(--text2); margin:0; cursor:pointer;">
@@ -911,7 +1072,16 @@ async function renderPlot() {
         </div>
 
         <div class="field-row3">
-          <div class="field"><label>Fila</label><input type="number" id="t-fila" inputmode="numeric" min="1"></div>
+          <div class="field">
+            <label>Fila</label>
+            <div style="display:flex; align-items:stretch; height:34px; border:1px solid var(--border); border-radius:4px; overflow:hidden;">
+              <button data-action="dec-fila" style="width:40px; flex-shrink:0; background:#eef2f3; border:none; border-right:1px solid var(--border); color:var(--text1); font-weight:bold; font-size:18px; cursor:pointer; margin:0;">-</button>
+              
+              <input type="number" id="t-fila" inputmode="numeric" min="1" style="border:none; border-radius:0; text-align:center; flex:1; min-width:30px; margin:0; outline:none; font-size:14px;">
+              
+              <button data-action="inc-fila" style="width:40px; flex-shrink:0; background:#eef2f3; border:none; border-left:1px solid var(--border); color:var(--text1); font-weight:bold; font-size:18px; cursor:pointer; margin:0;">+</button>
+            </div>
+          </div>
           <div class="field"><label>Cova</label><input type="number" id="t-cova" inputmode="numeric" min="1"></div>
           <div class="field"><label>Fuste</label><input type="number" id="t-fuste" inputmode="numeric" min="1" value="1"></div>
         </div>
@@ -938,8 +1108,8 @@ async function renderPlot() {
         <div class="field"><label>Categoria</label><div class="cat-grid" id="cat-grid"></div></div>
         <div class="field-row" style="margin-top:14px; display:flex; gap:8px;">
           <button class="btn btn-secondary btn-sm" data-action="close-tree-form" style="flex:1;">Cancelar</button>
-          <button class="btn btn-primary btn-sm" data-action="save-tree-fuste" style="flex:1.5;">+ Fuste</button>
-          <button class="btn btn-primary btn-sm" data-action="save-tree" style="flex:1.5;">+ Cova</button>
+          <button class="btn btn-primary btn-sm" id="btn-add-fuste" data-action="save-tree-fuste" style="flex:1; background:#2980b9; border-color:#2980b9; color:#fff;">+ Fuste</button>
+          <button class="btn btn-primary btn-sm" id="btn-save-tree" data-action="save-tree" style="flex:1.5;">+ Cova</button>
         </div>
         <div id="modal-delete-btn" class="hidden" style="margin-top:8px">
           <button class="btn btn-danger btn-sm" data-action="delete-tree" style="width:100%">Excluir medição</button>
@@ -1146,70 +1316,84 @@ async function openTreeForm(treeId) {
   appState.editingTreeId = treeId;
   appState.selectedCat = null;
   document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('selected'));
-  const deleteBtn = document.getElementById('modal-delete-btn');
   
+  const deleteBtn = document.getElementById('modal-delete-btn');
+  const btnFuste = document.getElementById('btn-add-fuste');
+  const btnSave = document.getElementById('btn-save-tree');
+  const relCovaBox = document.getElementById('t-relative-cova');
+
   if (treeId) {
     const t = await db.trees.get(treeId);
     if (!t) return;
     
-    document.getElementById('modal-tree-title-text').textContent = 'Editar fuste';
+    document.getElementById('modal-tree-title-text').textContent = 'Editar árvore';
+    if (relCovaBox) {
+      const trees = await db.trees.where('plotId').equals(appState.currentPlotId).toArray();
+      const { map: covaMap } = buildCovaMap(trees);
+      const relCova = covaMap[treeId] || t.cova;
+      relCovaBox.textContent = `${relCova}ª cova da fila ${t.fila}`;
+      relCovaBox.style.display = 'inline-block';
+    }
+    
+    if (btnFuste) btnFuste.style.display = 'none';
+    if (btnSave) btnSave.textContent = 'Salvar';
+
     document.getElementById('t-fila').value = t.fila;
     document.getElementById('t-cova').value = t.cova;
     document.getElementById('t-fuste').value = t.fuste;
-    document.getElementById('t-central').checked = !!t.central;
     
-    // Configura e alterna a interface para o instrumento correto
     const inst = t.inst || 'dap';
     document.getElementById('t-inst').value = inst;
-    toggleInstrument(inst);
+    if (typeof toggleInstrument === 'function') toggleInstrument(inst);
     
     document.getElementById('t-dap').value = (inst === 'dap' && t.dap != null) ? t.dap : '';
-    document.getElementById('t-cap').value = (inst === 'fita' && t.med1 != null) ? t.med1 : '';
-    document.getElementById('t-dap1').value = (inst === 'suta' && t.med1 != null) ? t.med1 : '';
-    document.getElementById('t-dap2').value = (inst === 'suta' && t.med2 != null) ? t.med2 : '';
+    if (document.getElementById('t-cap')) document.getElementById('t-cap').value = (inst === 'fita' && t.med1 != null) ? t.med1 : '';
+    if (document.getElementById('t-dap1')) document.getElementById('t-dap1').value = (inst === 'suta' && t.med1 != null) ? t.med1 : '';
+    if (document.getElementById('t-dap2')) document.getElementById('t-dap2').value = (inst === 'suta' && t.med2 != null) ? t.med2 : '';
+    
     document.getElementById('t-ht').value = t.ht != null ? t.ht : '';
+    if (document.getElementById('t-central')) document.getElementById('t-central').checked = !!t.central;
     
     selectCat(t.cat);
     if (deleteBtn) deleteBtn.classList.remove('hidden'); 
+    
   } else {
-    document.getElementById('modal-tree-title-text').textContent = 'Novo fuste';
+    document.getElementById('modal-tree-title-text').textContent = 'Nova árvore';
+    if (relCovaBox) relCovaBox.style.display = 'none';
     
-    // Mantém o último instrumento usado selecionado, mas limpa a tela
+    if (btnFuste) btnFuste.style.display = 'block';
+    if (btnSave) btnSave.textContent = '+ Cova';
+
     const currInst = document.getElementById('t-inst').value || 'dap';
-    toggleInstrument(currInst);
+    if (typeof toggleInstrument === 'function') toggleInstrument(currInst);
 
-    let nextFila = 1;
-    let nextCova = 1;
-
-    // Puxa as árvores da parcela atual
-    const plotTrees = await db.trees.where('plotId').equals(appState.currentPlotId).toArray();
-    
-    if (plotTrees.length > 0) {
-      // Ordena logicamente para encontrar o ponto mais distante já medido no campo
-      plotTrees.sort((a, b) => {
-        if (a.fila !== b.fila) return b.fila - a.fila; // Busca a maior fila
-        return b.cova - a.cova;                        // Busca a maior cova dentro da fila
-      });
-      
-      nextFila = plotTrees[0].fila || 1;
-      nextCova = (plotTrees[0].cova || 0) + 1; // Avança para a próxima cova disponível
+    // MÁGICA: Puxa do banco a última posição física trabalhada
+    const trees = await db.trees.where('plotId').equals(appState.currentPlotId).toArray();
+    if (trees.length > 0) {
+       trees.sort((a, b) => {
+          if (a.fila !== b.fila) return b.fila - a.fila;
+          if (a.cova !== b.cova) return b.cova - a.cova;
+          return b.fuste - a.fuste;
+       });
+       const last = trees[0];
+       document.getElementById('t-fila').value = last.fila;
+       document.getElementById('t-cova').value = last.cova + 1;
+    } else {
+       document.getElementById('t-fila').value = '1';
+       document.getElementById('t-cova').value = '1';
     }
-
-    // Aplica os valores descobertos (se for vazio, será 1-1-1)
-    document.getElementById('t-fila').value = nextFila;
-    document.getElementById('t-cova').value = nextCova;
+    
     document.getElementById('t-fuste').value = '1';
-    document.getElementById('t-central').checked = false;
-    // --------------------------------------------------
-
     document.getElementById('t-dap').value = '';
-    document.getElementById('t-cap').value = '';
-    document.getElementById('t-dap1').value = '';
-    document.getElementById('t-dap2').value = '';
+    if (document.getElementById('t-cap')) document.getElementById('t-cap').value = '';
+    if (document.getElementById('t-dap1')) document.getElementById('t-dap1').value = '';
+    if (document.getElementById('t-dap2')) document.getElementById('t-dap2').value = '';
     document.getElementById('t-ht').value = '';
+    if (document.getElementById('t-central')) document.getElementById('t-central').checked = false;
     
     if (deleteBtn) deleteBtn.classList.add('hidden'); 
   }
+  
   document.getElementById('modal-tree').classList.remove('hidden');
 }
 
@@ -1229,9 +1413,8 @@ async function saveTree(mode = 'next-cova') {
   const cova = parseInt(document.getElementById('t-cova').value);
   const fuste = parseInt(document.getElementById('t-fuste').value) || 1;
   const cat = appState.selectedCat;
-  const central = document.getElementById('t-central').checked; 
+  const central = document.getElementById('t-central') ? document.getElementById('t-central').checked : false; 
   
-  // LEITURA DO INSTRUMENTO E CONVERSÃO MATEMÁTICA
   const inst = document.getElementById('t-inst').value;
   let dap = null, med1 = null, med2 = null;
 
@@ -1241,13 +1424,13 @@ async function saveTree(mode = 'next-cova') {
   } else if (inst === 'fita') {
     const capRaw = document.getElementById('t-cap').value;
     med1 = capRaw !== '' ? parseFloat(capRaw.replace(',', '.')) : null;
-    if (med1 != null) dap = med1 / Math.PI; // Conversão CAP -> DAP
+    if (med1 != null) dap = med1 / Math.PI;
   } else if (inst === 'suta') {
     const d1Raw = document.getElementById('t-dap1').value;
     const d2Raw = document.getElementById('t-dap2').value;
     med1 = d1Raw !== '' ? parseFloat(d1Raw.replace(',', '.')) : null;
     med2 = d2Raw !== '' ? parseFloat(d2Raw.replace(',', '.')) : null;
-    if (med1 != null && med2 != null) dap = (med1 + med2) / 2; // Média Suta
+    if (med1 != null && med2 != null) dap = (med1 + med2) / 2;
     else if (med1 != null) dap = med1;
     else if (med2 != null) dap = med2;
   }
@@ -1264,7 +1447,6 @@ async function saveTree(mode = 'next-cova') {
     if (inst === 'suta' && (med1 == null || med2 == null)) return showToast('Informe DAP 1 e DAP 2');
   }
 
-  // LÓGICA DE RASTREAMENTO DE TEMPO (TIMESTAMPS GRANULARES)
   let tsDAP = null;
   let tsHT = null;
   const now = Date.now();
@@ -1274,12 +1456,10 @@ async function saveTree(mode = 'next-cova') {
     if (existingTree) {
       tsDAP = existingTree.tsDAP || null;
       tsHT = existingTree.tsHT || null;
-      // Só atualiza o tempo se o valor foi recém-adicionado ou alterado nesta edição
       if (dap != null && dap !== existingTree.dap) tsDAP = now;
       if (ht != null && ht !== existingTree.ht) tsHT = now;
     }
   } else {
-    // Nova árvore
     if (dap != null) tsDAP = now;
     if (ht != null) tsHT = now;
   }
@@ -1289,43 +1469,36 @@ async function saveTree(mode = 'next-cova') {
     fila, cova, fuste, dap, ht, cat,
     inst, med1, med2, central, 
     sync_status: 'pending',
-    tsDAP: tsDAP,       // Timestamp exclusivo da medição do DAP/CAP
-    tsHT: tsHT          // Timestamp exclusivo da medição da Altura
+    tsDAP: tsDAP,
+    tsHT: tsHT
   };
 
   if (appState.editingTreeId) {
-    // ESTÁ EDITANDO: Atualiza no banco, limpa o ID e fecha o modal
     await db.trees.update(appState.editingTreeId, treeData);
     appState.editingTreeId = null;
     document.getElementById('modal-tree').classList.add('hidden');
   } else {
-    // É UMA NOVA ÁRVORE: Verifica duplicidade e insere no banco
     const dup = await db.trees.where({plotId: appState.currentPlotId, fila: fila, cova: cova, fuste: fuste}).first();
     if (dup) return showToast('Fila-Cova-Fuste já registrado nesta parcela');
     
     treeData.id = generateUUID();
     await db.trees.add(treeData);
 
-    // ==========================================
-    // LÓGICA DE AUTO-INCREMENTO (O MODAL CONTINUA ABERTO)
-    // ==========================================
+    // AVANÇO INTELIGENTE BASEADO NO BOTÃO CLICADO
     if (mode === 'next-fuste') {
       document.getElementById('t-fuste').value = fuste + 1;
-      // A cova se mantém intacta
     } else {
       document.getElementById('t-cova').value = cova + 1; 
       document.getElementById('t-fuste').value = 1;       
     }
 
-    // Limpeza dos campos e *checkboxes*
     document.getElementById('t-dap').value = '';
-    document.getElementById('t-cap').value = '';
-    document.getElementById('t-dap1').value = '';
-    document.getElementById('t-dap2').value = '';
+    if (document.getElementById('t-cap')) document.getElementById('t-cap').value = '';
+    if (document.getElementById('t-dap1')) document.getElementById('t-dap1').value = '';
+    if (document.getElementById('t-dap2')) document.getElementById('t-dap2').value = '';
     document.getElementById('t-ht').value = '';
-    document.getElementById('t-central').checked = false;         
+    if (document.getElementById('t-central')) document.getElementById('t-central').checked = false;         
     
-    // Foca na input correta dependendo do instrumento utilizado
     setTimeout(() => {
       if (inst === 'dap') { const f = document.getElementById('t-dap'); if(f) f.focus(); }
       if (inst === 'fita') { const f = document.getElementById('t-cap'); if(f) f.focus(); }
@@ -1334,7 +1507,8 @@ async function saveTree(mode = 'next-cova') {
   }
 
   showToast('Salvo ✓');
-  await refreshPlotData(); // Atualiza a tela cirurgicamente sem fechar modais
+  if (typeof validatePlotTrees === 'function') await validatePlotTrees(appState.currentPlotId);
+  await refreshPlotData();
 }
 
 async function findDominants() {
