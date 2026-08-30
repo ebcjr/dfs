@@ -1401,16 +1401,20 @@ async function openTreeForm(treeId) {
 }
 
 async function deleteTree() {
-  const confirmed = await customConfirm('Excluir medição', 'Tem certeza que deseja excluir esta medição?');
-  if (!confirmed) return;
+  if (!appState.editingTreeId) return; 
+  
+  if (!confirm('Tem certeza que deseja excluir esta medição?')) return;
+  
   await db.trees.delete(appState.editingTreeId);
   
   document.getElementById('modal-tree').classList.add('hidden');
   showToast('Medição excluída');
+  
+  // Padronizado: Roda apenas a validação leve ao excluir
   await validateHistory(appState.currentPlotId);
+  
   await refreshPlotData();
 }
-
 async function saveTree(mode = 'next-cova') {
   const fila = parseInt(document.getElementById('t-fila').value);
   const cova = parseInt(document.getElementById('t-cova').value);
@@ -1510,7 +1514,8 @@ async function saveTree(mode = 'next-cova') {
   }
 
   showToast('Salvo ✓');
-  if (typeof validatePlotTrees === 'function') await validatePlotTrees(appState.currentPlotId);
+  await validateHistory(appState.currentPlotId);
+  
   await refreshPlotData();
 }
 
